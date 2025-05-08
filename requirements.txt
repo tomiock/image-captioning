@@ -1,0 +1,3 @@
+torch
+torchtext @ git+https://github.com/pytorch/text.git@v0.18.0
+torchvision

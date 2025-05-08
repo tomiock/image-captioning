@@ -1,0 +1,12 @@
+.venv/
+.idea/
+__pycache__/
+env/
+result
+**/*.pyc
+
+# DL related
+data/
+wandb/
+outputs/
+
