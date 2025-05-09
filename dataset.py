@@ -1,22 +1,29 @@
-import re
-import random
-import torch
-import nltk
-import matplotlib.pyplot as plt
-
-from torch.utils.data import DataLoader
-from torchvision.datasets import VisionDataset
-from torchvision.models import Inception_V3_Weights
-from torchvision import transforms
-from torchtext.data import get_tokenizer
-
-import os
 import csv
+import os
+import random
+import re
 from pathlib import Path
-from typing import Any, Optional, Callable
-from collections import Counter
+from typing import Any, Callable, Optional
 
+import matplotlib.pyplot as plt
+import torch
+import numpy as np
 from PIL import Image
+from tokenizers import Tokenizer, Encoding
+from tokenizers.models import WordPiece
+from tokenizers.normalizers import (
+    NFD,
+    Lowercase,
+    StripAccents,
+)
+from tokenizers.normalizers import (
+    Sequence as NormalizerSequence,
+)
+from tokenizers.pre_tokenizers import Whitespace
+from tokenizers.trainers import WordPieceTrainer
+from torch.utils.data import DataLoader
+from torchvision import transforms
+from torchvision.datasets import VisionDataset
 
 
 def default_loader(path: str) -> Any:
@@ -25,7 +32,7 @@ def default_loader(path: str) -> Any:
         return img.convert("RGB")
 
 
-class Flickr8k(VisionDataset):
+class Flickr8kDataset(VisionDataset):
     """
     `Flickr8k Entities <http://hockenmaier.cs.illinois.edu/8k-pictures.html>`_ Dataset.
     (Modified to support Kaggle's CSV annotation format)
@@ -101,6 +108,18 @@ class Flickr8k(VisionDataset):
         return len(self.ids)
 
 
+class EncodeCaptionsTransform:
+    def __init__(self, tokenizer: Tokenizer):
+        self.tokenizer = tokenizer
+
+    def __call__(self, captions_text_list: list[str]) -> list[Encoding]:
+        encoded_captions: list[Encoding] = []
+        for caption_text in captions_text_list:
+            preprocessed_text = get_preprocessed_caption(caption_text)
+            encoded_captions.append(self.tokenizer.encode(preprocessed_text))
+        return encoded_captions
+
+
 def captioning_collate_fn(batch):
     images = []
     selected_captions = []
@@ -110,11 +129,14 @@ def captioning_collate_fn(batch):
         list_of_all_captions_for_image = item[1]
 
         images.append(image_tensor)
-        selected_captions.append(random.choice(list_of_all_captions_for_image))
+        caption = random.choice(list_of_all_captions_for_image)
+        caption = torch.tensor(caption.ids)
+        selected_captions.append(caption)
 
     images_batch = torch.stack(images, 0)
+    captions_batch = torch.stack(selected_captions, 0)
 
-    return images_batch, selected_captions
+    return images_batch, captions_batch
 
 
 def get_preprocessed_caption(caption):
@@ -130,6 +152,15 @@ def caption_transforms(
     return list(map(get_preprocessed_caption, captions))
 
 
+def denormalize_image(img: torch.Tensor) -> np.ndarray:
+    denormalized_image = img.permute(1, 2, 0).numpy()
+    mean = torch.tensor([0.485, 0.456, 0.406]).numpy()
+    std = torch.tensor([0.229, 0.224, 0.225]).numpy()
+    denormalized_image = std * denormalized_image + mean
+    denormalized_image = denormalized_image.clip(0, 1)
+    return denormalized_image
+
+
 if __name__ == "__main__":
     # transforms that are needed to run the model by inception_v3
     image_transforms = transforms.Compose(
@@ -141,45 +172,136 @@ if __name__ == "__main__":
         ]
     )
 
-    dataset = Flickr8k(
+    preliminary_dataset = Flickr8kDataset(
+        root="data/Images/",
+        ann_file="data/captions.txt",
+    )
+
+    all_image_ids_sorted = (
+        preliminary_dataset.ids
+    )  # These are sorted unique image paths
+    num_total_images = len(all_image_ids_sorted)
+
+    # Create a list of indices [0, 1, ..., num_total_images-1]
+    master_indices = list(range(num_total_images))
+
+    random.seed(42)  # For reproducible splits
+    random.shuffle(master_indices)
+
+    # Define split ratios
+    train_ratio = 0.7
+    val_ratio = 0.15
+    # test_ratio is implicitly 1.0 - train_ratio - val_ratio
+
+    train_cutoff = int(train_ratio * num_total_images)
+    val_cutoff = int((train_ratio + val_ratio) * num_total_images)
+
+    train_indices = master_indices[:train_cutoff]
+    val_indices = master_indices[train_cutoff:val_cutoff]
+    test_indices = master_indices[val_cutoff:]
+
+    print(f"Total images: {num_total_images}")
+    print(f"Training images: {len(train_indices)}")
+    print(f"Validation images: {len(val_indices)}")
+    print(f"Test images: {len(test_indices)}")
+
+    train_captions_tokenizer = []
+    for idx in train_indices:
+        img_path = all_image_ids_sorted[idx]
+        train_captions_tokenizer.extend(preliminary_dataset.annotations[img_path])
+
+    special_tokens = ["<pad>", "<start>", "<end>", "<unk>"]
+    tokenizer = Tokenizer(WordPiece(unk_token="<unk>"))
+    tokenizer.normalizer = NormalizerSequence(
+        [
+            NFD(),
+            Lowercase(),
+            StripAccents(),
+        ]
+    )
+    tokenizer.pre_tokenizer = Whitespace()
+    trainer = WordPieceTrainer(
+        vocab_size=5000, min_frequency=10, special_tokens=special_tokens
+    )
+
+    tokenizer.train_from_iterator(train_captions_tokenizer, trainer=trainer)
+
+    pad_token = "<pad>"
+    pad_token_id = tokenizer.token_to_id(pad_token)
+    tokenizer.enable_padding(
+        length=50,
+        direction="right",
+        pad_id=pad_token_id,
+        pad_token=pad_token,
+    )
+
+    # our own transform for the captions that uses the tokenizer
+    caption_encoder_transform = EncodeCaptionsTransform(tokenizer)
+
+    dataset = Flickr8kDataset(
         root="data/Images/",
         ann_file="data/captions.txt",
         transform=image_transforms,
+        target_transform=caption_encoder_transform,
     )
 
-    flickr_dataloader = DataLoader(
-        dataset=dataset,
-        batch_size=1,
-        shuffle=True,
-        num_workers=12,
+    train_dataset = torch.utils.data.Subset(dataset, train_indices)
+    val_dataset = torch.utils.data.Subset(dataset, val_indices)
+    test_dataset = torch.utils.data.Subset(dataset, test_indices)
+
+    batch_size = 12
+    train_dataloader = DataLoader(
+        dataset=train_dataset,
+        batch_size=batch_size,
+        shuffle=True,  # Shuffle training data
+        num_workers=0,
+        collate_fn=captioning_collate_fn,
+    )
+    val_dataloader = DataLoader(
+        dataset=val_dataset,
+        batch_size=batch_size,
+        shuffle=False,  # No need to shuffle validation data
+        num_workers=0,
+        collate_fn=captioning_collate_fn,
+    )
+    test_dataloader = DataLoader(
+        dataset=test_dataset,
+        batch_size=batch_size,
+        shuffle=False,  # No need to shuffle test data
+        num_workers=0,
         collate_fn=captioning_collate_fn,
     )
 
-    # it should get the most up to date weights
-    model = torch.hub.load(
-        "pytorch/vision:v0.10.0", "inception_v3", weights=Inception_V3_Weights.DEFAULT
-    )
-    model.eval()
+    print(f"Tokenizer Vocabulary Size: {tokenizer.get_vocab_size()}")
 
-    image, captions = dataset[0]
+    print("\n--- Example from Dataset (dataset[0]) ---")
+    image_example, list_of_encodings_example = train_dataset[0]
+    print(f"Image tensor shape: {image_example.shape}")
+    print(f"Number of captions for this image: {len(list_of_encodings_example)}")
+    if list_of_encodings_example:
+        example_encoding = list_of_encodings_example[0]
+        print(f"Example caption tokens: {example_encoding.tokens}")
+        print(f"Example caption IDs (padded): {example_encoding.ids}")
 
-    for caption in captions:
-        print(caption)
+    print("\n--- Example from DataLoader (batch) ---")
+    try:
+        denormalized_image = denormalize_image(image_example)
 
-    input_batch = image.unsqueeze(0)  # create a mini-batch as expected by the model
+        plt.imshow(denormalized_image)
+        if list_of_encodings_example:
+            plt.title(
+                tokenizer.decode(
+                    list_of_encodings_example[0].ids, skip_special_tokens=True
+                )
+            )
+        plt.axis("off")
+        plt.show()
 
-    with torch.no_grad():
-        output = model(input_batch)
-
-    probabilities = torch.nn.functional.softmax(output[0], dim=0)
-
-    with open("data/imagenet_classes.txt", "r") as f:
-        categories = [s.strip() for s in f.readlines()]
-
-    top5_prob, top5_catid = torch.topk(probabilities, 5)
-    for i in range(top5_prob.size(0)):
-        print(categories[top5_catid[i]], top5_prob[i].item())
-
-    plt.imshow(torch.permute(image, (1, 2, 0)))
-    plt.show()
-
+    except StopIteration:
+        print(
+            "DataLoader is empty. This might happen if the dataset is too small for the batch size."
+        )
+    except IndexError:
+        print(
+            "IndexError during data loading or processing. Dataset might be empty or an image is missing."
+        )

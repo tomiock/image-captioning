@@ -17,7 +17,7 @@ sample_captions = [
     "A cat can also jump, not just sit.",
 ]
 
-special_tokens = ["<pad>", "<start>", "<end>"]
+special_tokens = ["<pad>", "<start>", "<end>", "<unk>"]
 
 tokenizer = Tokenizer(WordPiece(unk_token="<unk>"))
 

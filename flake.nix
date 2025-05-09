@@ -1,110 +1,32 @@
 {
-  description = "Python development environment with uv venv creation and automatic activation";
+    description = "Python development environment with basic scientific packages";
 
-  inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    flake-utils.url = "github:numtide/flake-utils";
-  };
+    inputs = {
+        nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+        flake-utils.url = "github:numtide/flake-utils";
+    };
 
-  outputs = { self, nixpkgs, flake-utils }:
-    flake-utils.lib.eachDefaultSystem (system:
-      let
-        pkgs = nixpkgs.legacyPackages.${system};
-        python = pkgs.python312; # Define the python interpreter
-        pythonPackages = python.pkgs;
+    outputs = { self, nixpkgs, flake-utils }:
+        flake-utils.lib.eachDefaultSystem (system:
+            let
+                pkgs = nixpkgs.legacyPackages.${system};
+                python = pkgs.python312;
+                pythonPackages = python.pkgs;
+                lib-path = with pkgs; pkgs.lib.makeLibraryPath [
+                    libffi
+                    openssl
+                    stdenv.cc.cc
+                ];
 
+                # Define a separate file for the flake template to avoid embedding issues
+                flakeContentFile = pkgs.writeTextFile {
+                    name = "flake-template";
+                    text = builtins.readFile ./flake.nix;
+                };
 
-        torchtext = pythonPackages.buildPythonPackage rec {
-          pname = "torchtext";
-          version = "0.18.0";
-
-          src = pkgs.fetchFromGitHub {
-            owner = "pytorch";
-            repo = "text";
-            rev = "v${version}";
-            fetchSubmodules = true;
-            deepClone = true;
-            sha256 = "sha256-ok91rw/76ivtTTd3DkdDG7N2aZE5WqPuZE4YbbQ0pYU=";
-          };
-
-          dontUseCmakeConfigure = true;
-
-          doCheck = false;
-
-          propagatedBuildInputs = [
-            pythonPackages.torch
-            pythonPackages.numpy
-            pythonPackages.requests
-            pythonPackages.tqdm
-          ];
-
-          nativeBuildInputs = [
-            pkgs.cmake
-            pkgs.ninja
-            pkgs.which
-            pkgs.stdenv.cc
-            pkgs.git
-          ];
-
-          buildInputs = [
-            pythonPackages.pybind11
-          ];
-
-          checkInputs = [
-            pythonPackages.pytestCheckHook
-          ];
-
-          pythonImportsCheck = [ "torchtext" ];
-
-           postPatch = ''
-            echo "Patching setup.py to prevent internal submodule initialization..."
-            sed -i '/^[[:space:]]*_init_submodule()/s/^/# /' setup.py
-            echo "Patching setup.py to set ROOT_DIR correctly using NIX_PROJECT_ROOT_DIR..."
-            substituteInPlace setup.py \
-              --replace "ROOT_DIR = Path(__file__).parent.resolve()" \
-                        "import os; ROOT_DIR = Path(os.environ.get('NIX_PROJECT_ROOT_DIR', Path(__file__).parent.resolve()))"
-            echo "Finished patching setup.py."
-          '';
-
-
-          preBuild = ''
-  EXPECTED_PROJECT_ROOT="$NIX_BUILD_TOP/source" # Assuming "source" is the dir after unpack
-  
-  echo "Current directory before potential cd in preBuild: $(pwd)"
-  if [ "$(pwd)" != "$EXPECTED_PROJECT_ROOT" ]; then
-    echo "WARNING: Current working directory is $(pwd), but expected $EXPECTED_PROJECT_ROOT."
-    echo "Attempting to change directory to $EXPECTED_PROJECT_ROOT."
-    cd "$EXPECTED_PROJECT_ROOT"
-    if [ "$(pwd)" != "$EXPECTED_PROJECT_ROOT" ]; then
-      echo "FATAL ERROR: Failed to change CWD to $EXPECTED_PROJECT_ROOT. Current CWD is $(pwd)."
-      exit 1
-    fi
-    echo "Successfully changed CWD to $(pwd)."
-  else
-    echo "Current working directory is already $EXPECTED_PROJECT_ROOT."
-  fi
-  
-  export NIX_PROJECT_ROOT_DIR=$(pwd) # This will be used by the patched setup.py
-  echo "NIX_PROJECT_ROOT_DIR successfully set to: $NIX_PROJECT_ROOT_DIR"
-'';
-
-        };
-
-        lib-path = with pkgs; lib.makeLibraryPath [
-          libffi
-          openssl
-          stdenv.cc.cc
-        ];
-
-        flakeContentFile = pkgs.writeTextFile {
-          name = "flake-template";
-          text = builtins.readFile ./flake.nix;
-        };
-
+        # Script to install the flake template
         installScript = pkgs.writeScriptBin "install-template" ''
           #!${pkgs.bash}/bin/bash
-          set -e # Exit on error
-
           if [ -f flake.nix ]; then
             echo "flake.nix already exists in current directory. Aborting."
             exit 1
@@ -120,149 +42,81 @@
             echo "Creating .gitignore..."
             cat > .gitignore << 'EOF'
 .venv/
-.idea/
 __pycache__/
 env/
 result
-**/*.pyc
-
-# DL related
-data/
-wandb/
-outputs/
-
 EOF
           fi
 
           echo "Template installed successfully!"
           echo "You can now use 'nix develop' in this directory."
         '';
+            in
+                {
+                devShells.default = pkgs.mkShell {
+                    packages = with pkgs; [
+                        pythonPackages.matplotlib
+                        pythonPackages.numpy
+                        pythonPackages.pandas
+                        pythonPackages.nltk
 
-        venvDir = ".venv";
+                        pythonPackages.torch
+                        pythonPackages.torchinfo
+                        pythonPackages.torchvision
+                        pythonPackages.transformers
+                        pythonPackages.datasets
+                        pythonPackages.tokenizers
+                        pythonPackages.wandb
 
-      in
-        {
-        devShells.default = pkgs.mkShell {
-          venvDir = venvDir; # directory to be activated automatically
-          packages = with pkgs; [
-            python 
+                        pythonPackages.kaggle
+                        pythonPackages.scikit-learn
+                        pythonPackages.ray
+                        pythonPackages.venvShellHook
+                        pythonPackages.ipykernel
+                        pkgs.uv # pip alternative
+                        pkgs.kaggle
+                        installScript
+                    ];
 
-            pythonPackages.matplotlib
-            pythonPackages.numpy
+                    buildInputs = with pkgs; [
+                        bashInteractive
+                        openssl
+                        git
+                        rsync
+                        zlib
+                        uv
+                    ];
 
-            torchtext
-            pythonPackages.torch
-            pythonPackages.torchvision
-            pythonPackages.datasets
-            pythonPackages.transformers
-            pythonPackages.tokenizers
+                    shellHook = ''
+              SOURCE_DATE_EPOCH=$(date +%s)
+              export "LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${lib-path}"
+              VENV=.venv
 
-            pythonPackages.nltk
-            pythonPackages.ipykernel
+              if test ! -d $VENV; then
+              python3.12 -m venv $VENV
+              fi
 
-            # Tools
-            pythonPackages.venvShellHook 
+              source ./$VENV/bin/activate
 
-            git
-            stdenv.cc.cc.lib
-            rsync
-            bashInteractive 
-            installScript 
-            coreutils 
-            cmake
-          ];
+              # Only run uv pip install if requirements.txt exists
+              if [ -f requirements.txt ]; then
+              uv pip install -r requirements.txt
+              else
+              echo "No requirements.txt found. Skipping package installation."
+              fi
 
-          buildInputs = with pkgs; [
-            cmake
-            openssl
-            zlib
-          ];
+              if [ ! -f flake.nix ]; then
+              echo "Type 'install-template' to install this flake template in the current directory"
+              fi
+              '';
 
-          # This hook runs BEFORE the interactive shell starts.
-          # Its job now is to PREPARE the environment.
-          shellHook = ''
-            set -e 
+                    postShellHook = ''
+              ln -sf ${python.sitePackages}/* ./.venv/lib/python3.12/site-packages
+              '';
+                };
 
-            # Set SOURCE_DATE_EPOCH 
-            SOURCE_DATE_EPOCH=$(date +%s)
-
-            # Ensure system libraries are findable
-            export LD_LIBRARY_PATH="${lib-path}:$LD_LIBRARY_PATH"
-
-            # Use the variable defined in 'let' block
-            VENV_DIR="${venvDir}" 
-
-            # Check if the venv directory needs to be created
-            if [ ! -d "$VENV_DIR" ]; then
-            echo "Creating Python virtual environment using uv in $VENV_DIR..."
-            # Create the venv using uv, pointing to the Nix-provided Python
-            ${pkgs.uv}/bin/uv venv -p ${python}/bin/python3.12 "$VENV_DIR" 
-            echo "Virtual environment created."
-            else
-            echo "Using existing virtual environment in $VENV_DIR"
-            fi
-
-            set +e 
-
-            if [ -f requirements.txt ]; then
-            echo "Attempting to sync environment with requirements.txt using uv..."
-            # Temporarily activate for the install command within this hook
-            # Ensure the activate script exists before sourcing
-            if [ -f "$VENV_DIR/bin/activate" ]; then
-            source "$VENV_DIR/bin/activate"
-            else
-            echo "WARNING: Activation script $VENV_DIR/bin/activate not found. Skipping package sync."
-            SKIP_SYNC=1 
-            fi
-
-            # Only run sync if activation succeeded
-            if [ -z "$SKIP_SYNC" ]; then
-            ${pkgs.uv}/bin/uv pip sync requirements.txt
-            SYNC_EXIT_CODE=$? # Capture exit code
-
-            # Deactivate the temporary activation within the hook
-            # Check if deactivate function exists before calling (robustness)
-            if command -v deactivate > /dev/null; then
-            deactivate
-            fi
-
-            if [ $SYNC_EXIT_CODE -ne 0 ]; then
-            echo ""
-            echo "WARNING: 'uv pip sync requirements.txt' failed (exit code $SYNC_EXIT_CODE)."
-            echo "Your Nix shell is ready, but Python packages may be missing or incorrect."
-            echo "Check error messages above, requirements.txt, and network connection."
-            echo "You might need to run 'uv pip sync requirements.txt' manually."
-            echo ""
-            else
-            echo "Environment sync with requirements.txt successful."
-            fi
-            fi # End check for SKIP_SYNC
-            else
-            echo "No requirements.txt found. Skipping package installation/sync."
-            fi
-
-            if [ ! -f flake.nix ]; then
-            echo "---------------------------------------------------------------------"
-            echo "This is a temporary shell. To make it persistent for this project,"
-            echo "run 'install-template' to copy the flake.nix file here."
-            echo "---------------------------------------------------------------------"
-            fi
-
-            echo "Nix shell environment configured. venvShellHook will now activate $VENV_DIR."
-            '';
-
-          postShellHook = ''
-            VENV_DIR="${venvDir}" 
-
-            # Ensure the target directory exists before creating symlinks
-            mkdir -p ./$VENV_DIR/lib/python3.12/site-packages/
-
-            # Symlink Nix store site-packages into the venv's site-packages
-            ln -sfn ${python.sitePackages}/* ./$VENV_DIR/lib/python3.12/site-packages/
-            '';
-        };
-
-        packages.default = installScript;
-      }
-    );
+                # Expose the template installation as a package
+                packages.default = installScript;
+            }
+        );
 }
