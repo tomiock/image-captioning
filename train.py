@@ -183,6 +183,8 @@ if __name__ == "__main__":
 
             # needs to be a mean
             loss = criterion(outputs.view(-1, vocab_size), captions.view(-1))
+            loss.backward()
+            optimizer.step()
 
             wandb.log({"train/batch_loss": loss.item()})
 
