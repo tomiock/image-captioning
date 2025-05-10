@@ -7,25 +7,24 @@ mkdir data/images/
 
 2. Download the zip files
 ```
-wget ...
-wget ...
+curl -L -o data/dataset.zip https://www.kaggle.com/api/v1/datasets/download/adityajn105/flickr8k
+```
+
+```
+mv data/Images/Images/* data/Images/
 ```
 
 3. Unzip
 ```
-unzip data/Flickr8k_Dataset.zip -d data/images/
-unzip data/Flickr8k_text.zip -d data/annotations/
+unzip data/dataset.zip
 ```
 
-4. Delete the "macosx" directories
-```
-rm -r data/annotations/__MACOSX
-rm -r data/images/__MACOSX
+4. Remove the zip file
+``
+rm data/dataset.zip
 ```
 
-5. Rename and organize for easier use
-```
-mv data/images/Flickr8k_Dataset/* data/images
-```
-> Now the images are located on `data/images/`
+
+> Now the images are located on `data/Images/`
+> With the captions files located on `data/captions.txt`
 

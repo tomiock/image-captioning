@@ -109,26 +109,27 @@ if __name__ == "__main__":
     val_dataset = torch.utils.data.Subset(dataset, val_indices)
     test_dataset = torch.utils.data.Subset(dataset, test_indices)
 
-    batch_size = 12
+    batch_size = 128
+    n_workers = 10
     train_dataloader = DataLoader(
         dataset=train_dataset,
         batch_size=batch_size,
         shuffle=True,
-        num_workers=0,
+        num_workers=n_workers,
         collate_fn=captioning_collate_fn,
     )
     val_dataloader = DataLoader(
         dataset=val_dataset,
         batch_size=batch_size,
         shuffle=False,
-        num_workers=0,
+        num_workers=n_workers,
         collate_fn=captioning_collate_fn,
     )
     test_dataloader = DataLoader(
         dataset=test_dataset,
         batch_size=batch_size,
         shuffle=False,
-        num_workers=0,
+        num_workers=n_workers,
         collate_fn=captioning_collate_fn,
     )
 
@@ -138,6 +139,7 @@ if __name__ == "__main__":
 
     # we loaded it with default pretrained weights
     inception_v3 = get_encoder()
+    inception_v3.to(device)
 
     wandb.init(
         entity='uni-DL-2025',
@@ -165,7 +167,7 @@ if __name__ == "__main__":
 
 
     # --- TRAINING ---
-    num_epochs = 2
+    num_epochs = 10
 
     for epoch in range(num_epochs):
         for images, captions in tqdm(train_dataloader):
