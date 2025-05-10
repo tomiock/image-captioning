@@ -1,7 +1,6 @@
 import os
 import random
 
-from pydantic import validate_call
 import wandb
 import torch
 from tokenizers import Tokenizer
@@ -111,7 +110,21 @@ if __name__ == "__main__":
     val_dataset = torch.utils.data.Subset(dataset, val_indices)
     test_dataset = torch.utils.data.Subset(dataset, test_indices)
 
-    batch_size = 128
+    run = wandb.init(
+        entity="uni-DL-2025",
+        project="image-captioning",
+        config={
+            "learning_rate": 0.0001,
+            "epochs": 10,
+            "batch_size": 128,
+            "embedding_dim": 512,
+            "hidden_dim": 512,
+            "vocab_size": tokenizer.get_vocab_size(),
+            "scheduler": "CosineAnnealingLR",
+        },
+    )
+
+    batch_size = wandb.config.batch_size
     n_workers = 10
     train_dataloader = DataLoader(
         dataset=train_dataset,
@@ -136,6 +149,7 @@ if __name__ == "__main__":
     )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    os.environ['TOKENIZERS_PARALLELISM'] = 'true'
 
     os.environ['TOKENIZERS_PARALLELISM'] = "true"
 
@@ -144,20 +158,6 @@ if __name__ == "__main__":
     # we loaded it with default pretrained weights
     inception_v3 = get_encoder()
     inception_v3.to(device)
-
-    wandb.init(
-        entity="uni-DL-2025",
-        project="image-captioning",
-        config={
-            "learning_rate": 0.0001,
-            "epochs": 100,
-            "batch_size": 128,
-            "embedding_dim": 512,
-            "hidden_dim": 512,
-            "vocab_size": tokenizer.get_vocab_size(),
-            "scheduler": "CosineAnnealingLR",
-        },
-    )
 
     wandb.define_metric("epoch")
     wandb.define_metric("train/epoch_loss", step_metric="epoch")
@@ -244,7 +244,7 @@ if __name__ == "__main__":
                 captions_val = captions_val.to(device)
                 images_val = images_val.to(device)
 
-                images_features_val, _  = inception_v3(images_val)
+                images_features_val, _ = inception_v3(images_val)
                 images_features_val = encoder(images_features_val)
 
                 pred = decoder(images_features_val, captions_val)
@@ -264,5 +264,16 @@ if __name__ == "__main__":
         print(
             f"Epoch {epoch + 1}/{num_epochs} -> Train Loss: {avg_train_loss:.4f}, Val Loss: {avg_val_loss:.4f}, LR: {current_lr:.6f}"
         )
+
+    torch.save(decoder.state_dict(), 'models/decoder.pth')
+    torch.save(encoder.state_dict(), 'models/encoder.pth')
+
+    artifact_decoder = wandb.Artifact('decoder', type='model')
+    artifact_decoder.add_file('models/decoder.pth')
+    run.log_artifact(artifact_decoder)
+
+    artifact_encoder = wandb.Artifact('encoder', type='model')
+    artifact_encoder.add_file('models/encoder.pth')
+    run.log_artifact(artifact_encoder)
 
     wandb.finish()
