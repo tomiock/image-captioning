@@ -1,3 +1,4 @@
+import os
 import random
 
 from pydantic import validate_call
@@ -90,7 +91,7 @@ if __name__ == "__main__":
     pad_token = "<pad>"
     pad_token_id = tokenizer.token_to_id(pad_token)
     tokenizer.enable_padding(
-        length=50,
+        length=200,
         direction="right",
         pad_id=pad_token_id,
         pad_token=pad_token,
@@ -136,6 +137,8 @@ if __name__ == "__main__":
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    os.environ['TOKENIZERS_PARALLELISM'] = "true"
+
     # --- MODEL Declarations ---
 
     # we loaded it with default pretrained weights
@@ -147,7 +150,7 @@ if __name__ == "__main__":
         project="image-captioning",
         config={
             "learning_rate": 0.0001,
-            "epochs": 10,
+            "epochs": 100,
             "batch_size": 128,
             "embedding_dim": 512,
             "hidden_dim": 512,
@@ -241,7 +244,7 @@ if __name__ == "__main__":
                 captions_val = captions_val.to(device)
                 images_val = images_val.to(device)
 
-                images_features_val = inception_v3(images_val)
+                images_features_val, _  = inception_v3(images_val)
                 images_features_val = encoder(images_features_val)
 
                 pred = decoder(images_features_val, captions_val)
