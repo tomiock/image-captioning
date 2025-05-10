@@ -1,5 +1,6 @@
 import random
 
+from pydantic import validate_call
 import wandb
 import torch
 from tokenizers import Tokenizer
@@ -142,13 +143,31 @@ if __name__ == "__main__":
     inception_v3.to(device)
 
     wandb.init(
-        entity='uni-DL-2025',
-        project='image-captioning',
+        entity="uni-DL-2025",
+        project="image-captioning",
+        config={
+            "learning_rate": 0.0001,
+            "epochs": 10,
+            "batch_size": 128,
+            "embedding_dim": 512,
+            "hidden_dim": 512,
+            "vocab_size": tokenizer.get_vocab_size(),
+            "scheduler": "CosineAnnealingLR",
+        },
     )
 
-    vocab_size: int = tokenizer.get_vocab_size()
+    wandb.define_metric("epoch")
+    wandb.define_metric("train/epoch_loss", step_metric="epoch")
+    wandb.define_metric("val/epoch_loss", step_metric="epoch")
+    wandb.define_metric("lr", step_metric="epoch")
+    wandb.define_metric("train_batch_step")
+    wandb.define_metric("train/batch_loss", step_metric="train_batch_step")
 
-    embedding_dim = hidden_dim = 512
+    vocab_size: int = wandb.config.vocab_size
+
+    embedding_dim = wandb.config.embedding_dim
+    hidden_dim = wandb.config.hidden_dim
+
     encoder = CNN_Encoder(in_dim=2048, embedding_dim=embedding_dim)
     decoder = RNN_Decoder(embedding_dim, hidden_dim, vocab_size=vocab_size)
 
@@ -159,17 +178,26 @@ if __name__ == "__main__":
     total_params = list(encoder.parameters()) + list(decoder.parameters())
 
     # --- LOSS and Optimizer ---
-    learning_rate = .0001
-
+    learning_rate = wandb.config.learning_rate
     criterion = torch.nn.CrossEntropyLoss().to(device)
-
     optimizer = torch.optim.Adam(total_params, lr=learning_rate)
-
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=wandb.config.epochs, eta_min=1e-6
+    )
 
     # --- TRAINING ---
-    num_epochs = 10
+    num_epochs = wandb.config.epochs
+
+    train_batch_step = 0
 
     for epoch in range(num_epochs):
+        encoder.train()
+        decoder.train()
+        total_train_loss = 0.0
+
+        train_pbar = tqdm(
+            train_dataloader, desc=f"Epoch {epoch + 1}/{num_epochs} [TRAIN]"
+        )
         for images, captions in tqdm(train_dataloader):
             captions = captions.to(device)
             images = images.to(device)
@@ -178,15 +206,60 @@ if __name__ == "__main__":
 
             with torch.no_grad():
                 images_features, _ = inception_v3(images)
-            
+
             images_encoded = encoder(images_features)
 
             outputs = decoder(images_encoded, captions)
 
             # needs to be a mean
             loss = criterion(outputs.view(-1, vocab_size), captions.view(-1))
+
             loss.backward()
             optimizer.step()
 
+            total_train_loss += loss.item()
+            train_batch_step += 1
+            wandb.log(
+                {
+                    "train/batch_loss": loss.item(),
+                    "train_batch_step": train_batch_step,
+                }
+            )
             wandb.log({"train/batch_loss": loss.item()})
+            train_pbar.set_postfix(loss=loss.item())
 
+        avg_train_loss = total_train_loss / len(train_dataloader)
+        wandb.log({"train/loss": avg_train_loss, "epoch": epoch + 1})
+
+        encoder.eval()
+        decoder.eval()
+        total_val_loss = 0.0
+
+        val_pbar = tqdm(val_dataloader, desc=f"Epoch {epoch + 1}/{num_epochs} [VAL]")
+        with torch.no_grad():
+            for images_val, captions_val in val_pbar:
+                captions_val = captions_val.to(device)
+                images_val = images_val.to(device)
+
+                images_features_val = inception_v3(images_val)
+                images_features_val = encoder(images_features_val)
+
+                pred = decoder(images_features_val, captions_val)
+
+                val_loss = criterion(pred.view(-1, vocab_size), captions_val.view(-1))
+
+                total_val_loss += val_loss.item()
+                val_pbar.set_postfix(loss=val_loss.item())
+
+        avg_val_loss = total_val_loss / len(val_dataloader)
+        wandb.log({"val/epoch_loss": avg_val_loss, "epoch": epoch + 1})
+
+        current_lr = optimizer.param_groups[0]["lr"]
+        wandb.log({"lr": current_lr, "epoch": epoch + 1})
+        scheduler.step()
+
+        print(
+            f"Epoch {epoch + 1}/{num_epochs} -> Train Loss: {avg_train_loss:.4f}, Val Loss: {avg_val_loss:.4f}, LR: {current_lr:.6f}"
+        )
+
+    wandb.finish()
