@@ -61,6 +61,7 @@ class Flickr8kDataset(VisionDataset):
 
         self.annotations: dict[str, list[str]] = {}
         temp_annotations: dict[str, list[str]] = {}
+
         with open(self.ann_file, "r", newline="", encoding="utf-8") as f:
             reader = csv.reader(f)
 
@@ -74,6 +75,7 @@ class Flickr8kDataset(VisionDataset):
                     temp_annotations[img_path].append(caption.strip())
                 else:
                     pass
+
         self.annotations = temp_annotations
         self.ids = list(sorted(self.annotations.keys()))
 

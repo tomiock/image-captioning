@@ -85,7 +85,9 @@ if __name__ == "__main__":
         vocab_size=5000, min_frequency=10, special_tokens=special_tokens
     )
 
+    # train and save the tokenizer
     tokenizer.train_from_iterator(train_captions_tokenizer, trainer=trainer)
+    tokenizer.save("models/tokenizer.json")
 
     pad_token = "<pad>"
     pad_token_id = tokenizer.token_to_id(pad_token)
@@ -268,6 +270,8 @@ if __name__ == "__main__":
     torch.save(decoder.state_dict(), 'models/decoder.pth')
     torch.save(encoder.state_dict(), 'models/encoder.pth')
 
+    tokenizer.save('models/tokenizer.json')
+
     artifact_decoder = wandb.Artifact('decoder', type='model')
     artifact_decoder.add_file('models/decoder.pth')
     run.log_artifact(artifact_decoder)
@@ -275,5 +279,9 @@ if __name__ == "__main__":
     artifact_encoder = wandb.Artifact('encoder', type='model')
     artifact_encoder.add_file('models/encoder.pth')
     run.log_artifact(artifact_encoder)
+
+    artifact_tokenizer = wandb.Artifact('tokenizer', type='model')
+    artifact_tokenizer.add_file('models/tokenizer.json')
+    run.log_artifact(artifact_tokenizer)
 
     wandb.finish()
