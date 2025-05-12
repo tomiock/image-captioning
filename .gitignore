@@ -6,8 +6,10 @@ result
 **/*.pyc
 
 # DL related
-data/
 wandb/
 outputs/
 
 models/*
+data/Images
+data/test_images
+data/captions.txt
