@@ -1,6 +1,7 @@
 import os
 import random
 
+import numpy as np
 import wandb
 import torch
 from tokenizers import Tokenizer
@@ -50,21 +51,16 @@ if __name__ == "__main__":
     random.shuffle(master_indices)
 
     # Define split ratios
-    train_ratio = 0.7
-    val_ratio = 0.15
-    # test_ratio is implicitly 1.0 - train_ratio - val_ratio
+    train_ratio = 0.8
 
     train_cutoff = int(train_ratio * num_total_images)
-    val_cutoff = int((train_ratio + val_ratio) * num_total_images)
 
     train_indices = master_indices[:train_cutoff]
-    val_indices = master_indices[train_cutoff:val_cutoff]
-    test_indices = master_indices[val_cutoff:]
+    val_indices = master_indices[train_cutoff:]
 
     print(f"Total images: {num_total_images}")
     print(f"Training images: {len(train_indices)}")
     print(f"Validation images: {len(val_indices)}")
-    print(f"Test images: {len(test_indices)}")
 
     train_captions_tokenizer = []
     for idx in train_indices:
@@ -110,15 +106,14 @@ if __name__ == "__main__":
 
     train_dataset = torch.utils.data.Subset(dataset, train_indices)
     val_dataset = torch.utils.data.Subset(dataset, val_indices)
-    test_dataset = torch.utils.data.Subset(dataset, test_indices)
 
     run = wandb.init(
         entity="uni-DL-2025",
         project="image-captioning",
         config={
             "learning_rate": 0.0001,
-            "epochs": 10,
-            "batch_size": 128,
+            "epochs": 100,
+            "batch_size": 256,
             "embedding_dim": 512,
             "hidden_dim": 512,
             "vocab_size": tokenizer.get_vocab_size(),
@@ -132,6 +127,7 @@ if __name__ == "__main__":
         dataset=train_dataset,
         batch_size=batch_size,
         shuffle=True,
+        drop_last=True,
         num_workers=n_workers,
         collate_fn=captioning_collate_fn,
     )
@@ -139,20 +135,12 @@ if __name__ == "__main__":
         dataset=val_dataset,
         batch_size=batch_size,
         shuffle=False,
+        drop_last=True,
         num_workers=n_workers,
         collate_fn=captioning_collate_fn,
     )
-    test_dataloader = DataLoader(
-        dataset=test_dataset,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=n_workers,
-        collate_fn=captioning_collate_fn,
-    )
-
+    
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    os.environ["TOKENIZERS_PARALLELISM"] = "true"
-
     os.environ["TOKENIZERS_PARALLELISM"] = "true"
 
     # --- MODEL Declarations ---
@@ -208,6 +196,7 @@ if __name__ == "__main__":
     num_epochs = wandb.config.epochs
 
     train_batch_step = 0
+    best_val_loss = np.inf
 
     for epoch in range(num_epochs):
         encoder.train()
@@ -275,14 +264,19 @@ if __name__ == "__main__":
 
         current_lr = optimizer.param_groups[0]["lr"]
         wandb.log({"lr": current_lr, "epoch": epoch + 1})
+
         scheduler.step()
+
+        if avg_val_loss < best_val_loss:
+            best_val_loss = avg_val_loss
+            torch.save(decoder.state_dict(), 'models/decoder.pth')
+            torch.save(encoder.state_dict(), 'models/encoder.pth')
 
         print(
             f"Epoch {epoch + 1}/{num_epochs} -> Train Loss: {avg_train_loss:.4f}, Val Loss: {avg_val_loss:.4f}, LR: {current_lr:.6f}"
         )
 
-    torch.save(decoder.state_dict(), "models/decoder.pth")
-    torch.save(encoder.state_dict(), "models/encoder.pth")
+    wandb.log({'best_val_loss': best_val_loss})
 
     tokenizer.save("models/tokenizer.json")
 
