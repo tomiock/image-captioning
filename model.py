@@ -1,3 +1,4 @@
+from numpy import number
 import torch
 import torch.nn as nn
 
@@ -27,15 +28,28 @@ class CNN_Encoder(nn.Module):
 
 
 class RNN_Decoder(nn.Module):
-    def __init__(self, embedding_dim, hidden_dim, vocab_size):
+    def __init__(
+        self,
+        embedding_dim,
+        hidden_dim,
+        vocab_size,
+        end_token_idx=2,
+        number_layers=1,
+    ):
         super(RNN_Decoder, self).__init__()
         self.hidden_dim = hidden_dim
+        self.num_layers = number_layers
+        self.end_token = end_token_idx
+
+        assert self.num_layers > 0
 
         # on the original paper units=embed_dim=512
 
         self.embedding = nn.Embedding(vocab_size, embedding_dim, 0)
 
-        self.lstm = nn.LSTM(embedding_dim, hidden_dim, batch_first=True)
+        self.lstm = nn.LSTM(
+            embedding_dim, hidden_dim, batch_first=True, num_layers=self.num_layers
+        )
 
         self.fc = nn.Linear(hidden_dim, vocab_size)
         self.relu = nn.ReLU()
@@ -51,6 +65,31 @@ class RNN_Decoder(nn.Module):
 
         # (B, S, vocab_size)
         output = self.fc(output)
+
+        return output
+
+    def sample(self, features, max_len=20):
+
+        features = features.unsqueeze(0)
+        output = []
+        (h, c) = (
+            torch.randn(self.num_layers, 1, self.hidden_dim),
+            torch.randn(self.num_layers, 1, self.hidden_dim),
+        )
+
+        for _ in range(max_len):
+            x, (h, c) = self.lstm(features, (h, c))
+            x = self.fc(x)
+            x = x.squeeze(1)
+
+            _, pred = x.max(dim=1)
+
+            end_token_predicted = pred.item() == self.end_token
+
+            if end_token_predicted:
+                break
+            output.append(pred.item())
+            features = self.embedding(pred.unsqueeze(0))
 
         return output
 
