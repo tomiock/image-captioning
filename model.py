@@ -107,7 +107,6 @@ def get_encoder() -> nn.Module:
         "pytorch/vision:v0.10.0", "inception_v3", weights=Inception_V3_Weights.DEFAULT
     )
 
-    model.dropout = Identity()
     model.fc = Identity()
 
     return model
