@@ -167,7 +167,7 @@ if __name__ == "__main__":
     use_latest_model = True
     if use_latest_model:
         en_artifact = run.use_artifact("encoder:latest")
-        de_artifact = run.use_artifact("encoder:latest")
+        de_artifact = run.use_artifact("decoder:latest")
 
         en_dir = en_artifact.download()
         de_dir = de_artifact.download()
@@ -175,8 +175,17 @@ if __name__ == "__main__":
         en_path = os.path.join(en_dir, "encoder.pth")
         de_path = os.path.join(de_dir, "decoder.pth")
 
+        print(en_path)
+        print(de_path)
+
         encoder.load_state_dict(torch.load(en_path))
         decoder.load_state_dict(torch.load(de_path))
+
+        tok_artifact = run.use_artifact("tokenizer:latest")
+        tok_dir = tok_artifact.download()
+        toke_path = os.path.join(tok_dir, "tokenizer.json")
+
+        tokenizer = Tokenizer.from_file(toke_path)
 
     encoder = encoder.to(device)
     decoder = decoder.to(device)
