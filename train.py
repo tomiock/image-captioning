@@ -151,9 +151,9 @@ if __name__ == "__main__":
     )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    os.environ['TOKENIZERS_PARALLELISM'] = 'true'
+    os.environ["TOKENIZERS_PARALLELISM"] = "true"
 
-    os.environ['TOKENIZERS_PARALLELISM'] = "true"
+    os.environ["TOKENIZERS_PARALLELISM"] = "true"
 
     # --- MODEL Declarations ---
 
@@ -175,6 +175,20 @@ if __name__ == "__main__":
 
     encoder = CNN_Encoder(in_dim=2048, embedding_dim=embedding_dim)
     decoder = RNN_Decoder(embedding_dim, hidden_dim, vocab_size=vocab_size)
+
+    use_latest_model = True
+    if use_latest_model:
+        en_artifact = run.use_artifact("encoder:latest")
+        de_artifact = run.use_artifact("encoder:latest")
+
+        en_dir = en_artifact.download()
+        de_dir = de_artifact.download()
+
+        en_path = os.path.join(en_dir, "encoder.pth")
+        de_path = os.path.join(de_dir, "decoder.pth")
+
+        encoder.load_state_dict(torch.load(en_path))
+        decoder.load_state_dict(torch.load(de_path))
 
     encoder = encoder.to(device)
     decoder = decoder.to(device)
@@ -267,21 +281,21 @@ if __name__ == "__main__":
             f"Epoch {epoch + 1}/{num_epochs} -> Train Loss: {avg_train_loss:.4f}, Val Loss: {avg_val_loss:.4f}, LR: {current_lr:.6f}"
         )
 
-    torch.save(decoder.state_dict(), 'models/decoder.pth')
-    torch.save(encoder.state_dict(), 'models/encoder.pth')
+    torch.save(decoder.state_dict(), "models/decoder.pth")
+    torch.save(encoder.state_dict(), "models/encoder.pth")
 
-    tokenizer.save('models/tokenizer.json')
+    tokenizer.save("models/tokenizer.json")
 
-    artifact_decoder = wandb.Artifact('decoder', type='model')
-    artifact_decoder.add_file('models/decoder.pth')
+    artifact_decoder = wandb.Artifact("decoder", type="model")
+    artifact_decoder.add_file("models/decoder.pth")
     run.log_artifact(artifact_decoder)
 
-    artifact_encoder = wandb.Artifact('encoder', type='model')
-    artifact_encoder.add_file('models/encoder.pth')
+    artifact_encoder = wandb.Artifact("encoder", type="model")
+    artifact_encoder.add_file("models/encoder.pth")
     run.log_artifact(artifact_encoder)
 
-    artifact_tokenizer = wandb.Artifact('tokenizer', type='model')
-    artifact_tokenizer.add_file('models/tokenizer.json')
+    artifact_tokenizer = wandb.Artifact("tokenizer", type="model")
+    artifact_tokenizer.add_file("models/tokenizer.json")
     run.log_artifact(artifact_tokenizer)
 
     wandb.finish()
