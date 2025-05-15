@@ -55,8 +55,7 @@ class RNN_Decoder(nn.Module):
             embedding_dim, hidden_dim, batch_first=True, num_layers=self.num_layers
         )
 
-        self.fc = nn.Linear(hidden_dim, vocab_size)
-        self.relu = nn.ReLU()
+        self.fc = nn.Linear(hidden_dim, vocab_size, bias=False)
 
     def forward(self, features, captions):
         embed = self.embedding(captions[:, :-1])  # (B, S, embed_dim)

@@ -1,7 +1,10 @@
 import os
 import random
 
+import sys
 import numpy as np
+import visdom
+
 import wandb
 import torch
 from tokenizers import Tokenizer
@@ -22,6 +25,8 @@ from tqdm import tqdm
 
 from dataset import Flickr8kDataset, captioning_collate_fn, EncodeCaptionsTransform
 from model import get_encoder, CNN_Encoder, RNN_Decoder
+
+np.set_printoptions(threshold=sys.maxsize)
 
 if __name__ == "__main__":
     # transforms that are needed to run the model by inception_v3
@@ -113,7 +118,7 @@ if __name__ == "__main__":
         config={
             "learning_rate": 0.0001,
             "epochs": 100,
-            "batch_size": 256,
+            "batch_size": 10,
             "embedding_dim": 512,
             "hidden_dim": 512,
             "vocab_size": tokenizer.get_vocab_size(),
@@ -164,7 +169,7 @@ if __name__ == "__main__":
     encoder = CNN_Encoder(in_dim=2048, embedding_dim=embedding_dim)
     decoder = RNN_Decoder(embedding_dim, hidden_dim, vocab_size=vocab_size)
 
-    use_latest_model = True
+    use_latest_model = False
     if use_latest_model:
         en_artifact = run.use_artifact("encoder:latest")
         de_artifact = run.use_artifact("decoder:latest")
@@ -174,9 +179,6 @@ if __name__ == "__main__":
 
         en_path = os.path.join(en_dir, "encoder.pth")
         de_path = os.path.join(de_dir, "decoder.pth")
-
-        print(en_path)
-        print(de_path)
 
         encoder.load_state_dict(torch.load(en_path))
         decoder.load_state_dict(torch.load(de_path))
@@ -210,6 +212,8 @@ if __name__ == "__main__":
     wandb.watch(encoder, criterion, log="all", log_freq=100, log_graph=True)
     wandb.watch(decoder, criterion, log="all", log_freq=100, log_graph=True)
 
+    vis = visdom.Visdom()
+
     for epoch in range(num_epochs):
         encoder.train()
         decoder.train()
@@ -232,7 +236,10 @@ if __name__ == "__main__":
             outputs = decoder(images_encoded, captions)
 
             # needs to be a mean
-            loss = criterion(outputs.view(-1, vocab_size), captions.view(-1))
+            outputs = outputs.view(-1, vocab_size)
+            captions = captions.view(-1)
+            
+            loss = criterion(outputs, captions)
 
             loss.backward()
             optimizer.step()
