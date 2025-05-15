@@ -139,7 +139,7 @@ if __name__ == "__main__":
         num_workers=n_workers,
         collate_fn=captioning_collate_fn,
     )
-    
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     os.environ["TOKENIZERS_PARALLELISM"] = "true"
 
@@ -206,6 +206,9 @@ if __name__ == "__main__":
 
     train_batch_step = 0
     best_val_loss = np.inf
+
+    wandb.watch(encoder, criterion, log="all", log_freq=100, log_graph=True)
+    wandb.watch(decoder, criterion, log="all", log_freq=100, log_graph=True)
 
     for epoch in range(num_epochs):
         encoder.train()
@@ -278,14 +281,14 @@ if __name__ == "__main__":
 
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
-            torch.save(decoder.state_dict(), 'models/decoder.pth')
-            torch.save(encoder.state_dict(), 'models/encoder.pth')
+            torch.save(decoder.state_dict(), "models/decoder.pth")
+            torch.save(encoder.state_dict(), "models/encoder.pth")
 
         print(
             f"Epoch {epoch + 1}/{num_epochs} -> Train Loss: {avg_train_loss:.4f}, Val Loss: {avg_val_loss:.4f}, LR: {current_lr:.6f}"
         )
 
-    wandb.log({'best_val_loss': best_val_loss})
+    wandb.log({"best_val_loss": best_val_loss})
 
     tokenizer.save("models/tokenizer.json")
 

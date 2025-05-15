@@ -251,7 +251,7 @@ if __name__ == "__main__":
     val_dataset = torch.utils.data.Subset(dataset, val_indices)
     test_dataset = torch.utils.data.Subset(dataset, test_indices)
 
-    batch_size = 12
+    batch_size = 1
     train_dataloader = DataLoader(
         dataset=train_dataset,
         batch_size=batch_size,
@@ -274,36 +274,12 @@ if __name__ == "__main__":
         collate_fn=captioning_collate_fn,
     )
 
-    print(f"Tokenizer Vocabulary Size: {tokenizer.get_vocab_size()}")
+    for image, caption in train_dataloader:
+        denormalized_image = denormalize_image(image.squeeze(0))
 
-    print("\n--- Example from Dataset (dataset[0]) ---")
-    image_example, list_of_encodings_example = train_dataset[0]
-    print(f"Image tensor shape: {image_example.shape}")
-    print(f"Number of captions for this image: {len(list_of_encodings_example)}")
-    if list_of_encodings_example:
-        example_encoding = list_of_encodings_example[0]
-        print(f"Example caption tokens: {example_encoding.tokens}")
-        print(f"Example caption IDs (padded): {example_encoding.ids}")
-
-    print("\n--- Example from DataLoader (batch) ---")
-    try:
-        denormalized_image = denormalize_image(image_example)
+        caption = caption.squeeze(0)
 
         plt.imshow(denormalized_image)
-        if list_of_encodings_example:
-            plt.title(
-                tokenizer.decode(
-                    list_of_encodings_example[0].ids, skip_special_tokens=True
-                )
-            )
+        plt.title(tokenizer.decode(list(caption)))
         plt.axis("off")
         plt.show()
-
-    except StopIteration:
-        print(
-            "DataLoader is empty. This might happen if the dataset is too small for the batch size."
-        )
-    except IndexError:
-        print(
-            "IndexError during data loading or processing. Dataset might be empty or an image is missing."
-        )

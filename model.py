@@ -1,9 +1,13 @@
-from numpy import number
+import numpy as np
+import matplotlib.pyplot as plt
+
 import torch
 import torch.nn as nn
 
 from torchvision.models import Inception_V3_Weights
 from torchinfo import summary
+
+from torch.nn.functional import softmax
 
 
 class Identity(nn.Module):
@@ -81,6 +85,14 @@ class RNN_Decoder(nn.Module):
             x, (h, c) = self.lstm(features, (h, c))
             x = self.fc(x)
             x = x.squeeze(1)
+
+            if False:
+                data = (softmax(x).detach().numpy())
+                heights,bins = np.histogram(data,bins=1000)
+                heights = heights/float(sum(heights))
+                binMids=bins[:-1]+np.diff(bins)/2.
+                plt.plot(binMids,heights)
+                plt.show()
 
             _, pred = x.max(dim=1)
 
