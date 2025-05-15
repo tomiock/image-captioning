@@ -3,7 +3,6 @@ import random
 
 import sys
 import numpy as np
-import visdom
 
 import wandb
 import torch
@@ -24,7 +23,7 @@ from torchvision import transforms
 from tqdm import tqdm
 
 from dataset import Flickr8kDataset, captioning_collate_fn, EncodeCaptionsTransform
-from model import get_encoder, CNN_Encoder, RNN_Decoder
+from model import CNN_Encoder, RNN_Decoder
 
 np.set_printoptions(threshold=sys.maxsize)
 
@@ -151,9 +150,6 @@ if __name__ == "__main__":
     # --- MODEL Declarations ---
 
     # we loaded it with default pretrained weights
-    inception_v3 = get_encoder()
-    inception_v3.to(device)
-
     wandb.define_metric("epoch")
     wandb.define_metric("train/epoch_loss", step_metric="epoch")
     wandb.define_metric("val/epoch_loss", step_metric="epoch")
@@ -166,7 +162,7 @@ if __name__ == "__main__":
     embedding_dim = wandb.config.embedding_dim
     hidden_dim = wandb.config.hidden_dim
 
-    encoder = CNN_Encoder(in_dim=2048, embedding_dim=embedding_dim)
+    encoder = CNN_Encoder(embed_size=embedding_dim)
     decoder = RNN_Decoder(embedding_dim, hidden_dim, vocab_size=vocab_size)
 
     use_latest_model = False
@@ -198,7 +194,9 @@ if __name__ == "__main__":
     # --- LOSS and Optimizer ---
     learning_rate = wandb.config.learning_rate
     criterion = torch.nn.CrossEntropyLoss().to(device)
+
     optimizer = torch.optim.Adam(total_params, lr=learning_rate)
+
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=wandb.config.epochs, eta_min=1e-6
     )
@@ -211,8 +209,6 @@ if __name__ == "__main__":
 
     wandb.watch(encoder, criterion, log="all", log_freq=100, log_graph=True)
     wandb.watch(decoder, criterion, log="all", log_freq=100, log_graph=True)
-
-    vis = visdom.Visdom()
 
     for epoch in range(num_epochs):
         encoder.train()
@@ -228,10 +224,7 @@ if __name__ == "__main__":
 
             optimizer.zero_grad()
 
-            with torch.no_grad():
-                images_features, _ = inception_v3(images)
-
-            images_encoded = encoder(images_features)
+            images_encoded = encoder(images)
 
             outputs = decoder(images_encoded, captions)
 

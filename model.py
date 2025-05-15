@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 
-from torchvision.models import Inception_V3_Weights
+from torchvision import models
 from torchinfo import summary
 
 from torch.nn.functional import softmax
@@ -19,16 +19,24 @@ class Identity(nn.Module):
 
 
 class CNN_Encoder(nn.Module):
-    def __init__(self, in_dim, embedding_dim):
+    def __init__(self, embed_size):
         super(CNN_Encoder, self).__init__()
-        self.flat = nn.Flatten()
-        self.fc = nn.Linear(in_dim, embedding_dim)
+        # pretrained model resnet50
+        resnet = models.resnet50(pretrained=True)
 
-    def forward(self, x):
-        x = self.flat(x)
-        x = self.fc(x)
-        x = nn.functional.relu(x)
-        return x
+        for param in resnet.parameters():
+            param.requires_grad_(False)
+
+        modules = list(resnet.children())[:-1]
+        self.resnet = nn.Sequential(*modules)
+        # replace the classifier with a fully connected embedding layer
+        self.embed = nn.Linear(resnet.fc.in_features, embed_size)
+
+    def forward(self, images):
+        features = self.resnet(images)
+        features = features.view(features.size(0), -1)
+        features = self.embed(features)
+        return features
 
 
 class RNN_Decoder(nn.Module):
@@ -72,7 +80,6 @@ class RNN_Decoder(nn.Module):
         return output
 
     def sample(self, features, max_len=20):
-
         features = features.unsqueeze(0)
         output = []
         (h, c) = (
@@ -86,11 +93,11 @@ class RNN_Decoder(nn.Module):
             x = x.squeeze(1)
 
             if False:
-                data = (softmax(x).detach().numpy())
-                heights,bins = np.histogram(data,bins=1000)
-                heights = heights/float(sum(heights))
-                binMids=bins[:-1]+np.diff(bins)/2.
-                plt.plot(binMids,heights)
+                data = softmax(x).detach().numpy()
+                heights, bins = np.histogram(data, bins=1000)
+                heights = heights / float(sum(heights))
+                binMids = bins[:-1] + np.diff(bins) / 2.0
+                plt.plot(binMids, heights)
                 plt.show()
 
             _, pred = x.max(dim=1)
