@@ -60,7 +60,7 @@ class RNN_Decoder(nn.Module):
         self.embedding = nn.Embedding(vocab_size, embedding_dim, 0)
 
         self.lstm = nn.LSTM(
-            embedding_dim, hidden_dim, num_layers=self.num_layers
+            embedding_dim, hidden_dim, num_layers=self.num_layers, batch_first=True,
         )
 
         self.fc = nn.Linear(hidden_dim, vocab_size, bias=False)
@@ -83,8 +83,8 @@ class RNN_Decoder(nn.Module):
         features = features.unsqueeze(0)
         output = []
         (h, c) = (
-            torch.randn(self.num_layers, 1, self.hidden_dim),
-            torch.randn(self.num_layers, 1, self.hidden_dim),
+            torch.zeros(self.num_layers, 1, self.hidden_dim),
+            torch.zeros(self.num_layers, 1, self.hidden_dim),
         )
 
         for _ in range(max_len):

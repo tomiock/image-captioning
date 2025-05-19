@@ -230,7 +230,7 @@ if __name__ == "__main__":
 
             # needs to be a mean
             outputs = outputs.view(-1, vocab_size)
-            captions = captions.view(-1)
+            captions = captions[:, :1].reshape(-1)
             
             loss = criterion(outputs, captions)
 
