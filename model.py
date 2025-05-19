@@ -60,7 +60,7 @@ class RNN_Decoder(nn.Module):
         self.embedding = nn.Embedding(vocab_size, embedding_dim, 0)
 
         self.lstm = nn.LSTM(
-            embedding_dim, hidden_dim, batch_first=True, num_layers=self.num_layers
+            embedding_dim, hidden_dim, num_layers=self.num_layers
         )
 
         self.fc = nn.Linear(hidden_dim, vocab_size, bias=False)
@@ -98,6 +98,7 @@ class RNN_Decoder(nn.Module):
                 heights = heights / float(sum(heights))
                 binMids = bins[:-1] + np.diff(bins) / 2.0
                 plt.plot(binMids, heights)
+                plt.yscale('log')
                 plt.show()
 
             _, pred = x.max(dim=1)

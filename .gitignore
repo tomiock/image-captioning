@@ -8,6 +8,7 @@ result
 # DL related
 wandb/
 outputs/
+artifacts/
 
 models/*
 data/Images
