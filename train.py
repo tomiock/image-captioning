@@ -116,8 +116,8 @@ if __name__ == "__main__":
         project="image-captioning",
         config={
             "learning_rate": 0.0001,
-            "epochs": 100,
-            "batch_size": 10,
+            "epochs": 20,
+            "batch_size": 256,
             "embedding_dim": 512,
             "hidden_dim": 512,
             "vocab_size": tokenizer.get_vocab_size(),
@@ -261,8 +261,7 @@ if __name__ == "__main__":
                 captions_val = captions_val.to(device)
                 images_val = images_val.to(device)
 
-                images_features_val, _ = inception_v3(images_val)
-                images_features_val = encoder(images_features_val)
+                images_features_val = encoder(images_val)
 
                 pred = decoder(images_features_val, captions_val)
 
