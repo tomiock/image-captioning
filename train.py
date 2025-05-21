@@ -116,7 +116,7 @@ if __name__ == "__main__":
         project="image-captioning",
         config={
             "learning_rate": 0.0001,
-            "epochs": 20,
+            "epochs": 10,
             "batch_size": 256,
             "embedding_dim": 512,
             "hidden_dim": 512,
@@ -228,9 +228,8 @@ if __name__ == "__main__":
 
             outputs = decoder(images_encoded, captions)
 
-            # needs to be a mean
-            outputs = outputs.view(-1, vocab_size)
-            captions = captions[:, :1].reshape(-1)
+            outputs = outputs[:, :-1, :].reshape(-1, vocab_size)
+            captions = captions[:, 1:].reshape(-1)
             
             loss = criterion(outputs, captions)
 

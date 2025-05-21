@@ -160,6 +160,8 @@ class Flickr_Dataset(VisionDataset):
         with open(self.ann_file, "r", newline="", encoding="utf-8") as f:
             reader = csv.reader(f)
 
+            _ = next(reader) # take out the header
+
             for row in reader:
                 if len(row) == 2:
                     img_filename, caption = row
