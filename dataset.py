@@ -1,4 +1,5 @@
 import csv
+import json
 import os
 import random
 import re
@@ -6,10 +7,12 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 import matplotlib.pyplot as plt
-import torch
 import numpy as np
+import tokenizers
+import torch
 from PIL import Image
-from tokenizers import Tokenizer, Encoding
+from pycocotools.coco import COCO
+from tokenizers import Encoding, Tokenizer
 from tokenizers.models import WordPiece
 from tokenizers.normalizers import (
     NFD,
@@ -32,7 +35,84 @@ def default_loader(path: str) -> Any:
         return img.convert("RGB")
 
 
-class Flickr8kDataset(VisionDataset):
+class COCO_Dataset(VisionDataset):
+    def __init__(
+        self,
+        annotations_file,
+        img_folder,
+        transform,
+    ):
+        self.transform = transform
+        self.img_folder = img_folder
+        self.coco = COCO(annotations_file)
+        self.ids = list(self.coco.anns.keys())
+
+        self.mode = None
+
+        test_info = json.loads(open(annotations_file).read())
+
+        # we need a paths list
+        self.image_paths = [item["file_name"] for item in test_info["images"]]
+
+        print(self.ids[0])
+
+    @property
+    def tokenizer(self) -> tokenizers.Tokenizer:
+        return self._tokenizer
+
+    def __getitem__(self, index):
+        # obtain image and caption if in training mode
+        ann_id = self.ids[index]
+        caption = self.coco.anns[ann_id]["caption"]
+        img_id = self.coco.anns[ann_id]["image_id"]
+        path = self.coco.loadImgs(img_id)[0]["file_name"]
+
+        # Convert image to tensor and pre-process using transform
+        image = Image.open(os.path.join(self.img_folder, path)).convert("RGB")
+        image = self.transform(image)
+
+        # Convert caption to tensor of word ids.
+        tokens = nltk.tokenize.word_tokenize(str(caption).lower())
+        caption = []
+        caption.append(self.vocab(self.vocab.start_word))
+        caption.extend([self.vocab(token) for token in tokens])
+        caption.append(self.vocab(self.vocab.end_word))
+        caption = torch.Tensor(caption).long()
+
+        # return pre-processed image and caption tensors
+        return image, caption
+
+        """
+            path = self.image_paths[index]
+
+            # Convert image to tensor and pre-process using transform
+            PIL_image = Image.open(os.path.join(self.img_folder, path)).convert("RGB")
+            orig_image = np.array(PIL_image)
+            image = self.transform(PIL_image)
+
+            # return original image and pre-processed image tensor
+            return orig_image, image
+        """
+
+    def get_train_indices(self):
+        sel_length = np.random.choice(self.caption_lengths)
+        all_indices = np.where(
+            [
+                self.caption_lengths[i] == sel_length
+                for i in np.arange(len(self.caption_lengths))
+            ]
+        )[0]
+        indices = list(np.random.choice(all_indices, size=self.batch_size))
+        return indices
+
+    def __len__(self):
+        if self.mode == "train":
+            return len(self.ids)
+        else:
+            return len(self.image_paths)
+
+
+class Flickr_Dataset(VisionDataset):
     """
     `Flickr8k Entities <http://hockenmaier.cs.illinois.edu/8k-pictures.html>`_ Dataset.
     (Modified to support Kaggle's CSV annotation format)
@@ -51,6 +131,7 @@ class Flickr8kDataset(VisionDataset):
         self,
         root: str | Path,
         ann_file: str,
+        tokenizer: Optional[Tokenizer] = None,
         transform: Optional[Callable] = None,
         target_transform: Optional[Callable] = None,
         loader: Callable[[str], Any] = default_loader,
@@ -58,6 +139,20 @@ class Flickr8kDataset(VisionDataset):
         super().__init__(root, transform=transform, target_transform=target_transform)
         self.ann_file = os.path.expanduser(ann_file)
         self.loader = loader
+
+        special_tokens = ["<pad>", "<start>", "<end>", "<unk>"]
+        tokenizer = Tokenizer(WordPiece(unk_token="<unk>"))
+        tokenizer.normalizer = NormalizerSequence(
+            [
+                NFD(),
+                Lowercase(),
+                StripAccents(),
+            ]
+        )
+        tokenizer.pre_tokenizer = Whitespace()
+        trainer = WordPieceTrainer(
+            vocab_size=5000, min_frequency=10, special_tokens=special_tokens
+        )
 
         self.annotations: dict[str, list[str]] = {}
         temp_annotations: dict[str, list[str]] = {}
@@ -77,7 +172,7 @@ class Flickr8kDataset(VisionDataset):
                     pass
 
         self.annotations = temp_annotations
-        self.ids = list(sorted(self.annotations.keys()))
+        self.image_paths = list(sorted(self.annotations.keys()))
 
         self.all_annontations = [x for xs in self.annotations.values() for x in xs]
 
@@ -92,7 +187,7 @@ class Flickr8kDataset(VisionDataset):
         Returns:
             tuple: Tuple (image, target). target is a list of captions for the image.
         """
-        img_id = self.ids[index]
+        img_id = self.image_paths[index]
 
         # Images
         img = self.loader(img_id)
@@ -107,7 +202,7 @@ class Flickr8kDataset(VisionDataset):
         return img, target
 
     def __len__(self) -> int:
-        return len(self.ids)
+        return len(self.image_paths)
 
 
 class EncodeCaptionsTransform:
@@ -174,13 +269,13 @@ if __name__ == "__main__":
         ]
     )
 
-    preliminary_dataset = Flickr8kDataset(
+    preliminary_dataset = Flickr_Dataset(
         root="data/Images/",
         ann_file="data/captions.txt",
     )
 
     all_image_ids_sorted = (
-        preliminary_dataset.ids
+        preliminary_dataset.image_paths
     )  # These are sorted unique image paths
     num_total_images = len(all_image_ids_sorted)
 
@@ -240,7 +335,7 @@ if __name__ == "__main__":
     # our own transform for the captions that uses the tokenizer
     caption_encoder_transform = EncodeCaptionsTransform(tokenizer)
 
-    dataset = Flickr8kDataset(
+    dataset = Flickr_Dataset(
         root="data/Images/",
         ann_file="data/captions.txt",
         transform=image_transforms,
