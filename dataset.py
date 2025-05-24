@@ -38,30 +38,55 @@ def default_loader(path: str) -> Any:
 class COCO_Dataset(VisionDataset):
     def __init__(
         self,
+        root,
         annotations_file,
-        img_folder,
-        transform,
+        tokenizer = Optional[Tokenizer],
+        max_caption_len = 40,
+        transform = None,
     ):
         self.transform = transform
-        self.img_folder = img_folder
+        self.img_folder = root
         self.coco = COCO(annotations_file)
+        self.max_caption_len = max_caption_len
+
         self.ids = list(self.coco.anns.keys())
 
-        self.mode = None
+        # we need the captions to train the tokenizer
+        if not tokenizer:
+            self.captions = [data['caption'] for data in list(self.coco.anns.values())]
 
-        test_info = json.loads(open(annotations_file).read())
+            self.UNK_TOKEN = '<unk>'
+            self.PAD_TOKEN = '<pad>'
+            self.START_TOKEN = '<start>'
+            self.END_TOKEN = '<end>'
 
-        # we need a paths list
-        self.image_paths = [item["file_name"] for item in test_info["images"]]
+            special_tokens = [self.UNK_TOKEN ,self.PAD_TOKEN ,self.START_TOKEN ,self.END_TOKEN]
 
-        print(self.ids[0])
+            self._tokenizer = Tokenizer(WordPiece(unk_token=self.UNK_TOKEN))
+            self._tokenizer.normalizer = NormalizerSequence([NFD(), Lowercase(), StripAccents(),])
+            self._tokenizer.pre_tokenizer = Whitespace()
 
+            _tokenizer_trainer = WordPieceTrainer(vocab_size=10000, min_frequency=10, special_tokens=special_tokens)
+            self._tokenizer.train_from_iterator(self.captions, trainer=_tokenizer_trainer)
+
+            self.pad_token_id = self._tokenizer.token_to_id(self.PAD_TOKEN)
+            self._tokenizer.enable_padding(
+                length=self.max_caption_len,
+                direction='right',
+                pad_id=self.pad_token_id,
+                pad_token=self.PAD_TOKEN,
+            )
+
+            del self.captions # will access them directly later
+        else:
+            self._tokenizer = tokenizer
+
+        
     @property
     def tokenizer(self) -> tokenizers.Tokenizer:
         return self._tokenizer
 
     def __getitem__(self, index):
-        # obtain image and caption if in training mode
         ann_id = self.ids[index]
         caption = self.coco.anns[ann_id]["caption"]
         img_id = self.coco.anns[ann_id]["image_id"]
@@ -69,47 +94,18 @@ class COCO_Dataset(VisionDataset):
 
         # Convert image to tensor and pre-process using transform
         image = Image.open(os.path.join(self.img_folder, path)).convert("RGB")
-        image = self.transform(image)
+        if self.transform:
+            image = self.transform(image)
 
-        # Convert caption to tensor of word ids.
-        tokens = nltk.tokenize.word_tokenize(str(caption).lower())
-        caption = []
-        caption.append(self.vocab(self.vocab.start_word))
-        caption.extend([self.vocab(token) for token in tokens])
-        caption.append(self.vocab(self.vocab.end_word))
-        caption = torch.Tensor(caption).long()
+        # we need to add the special tokens
+        caption = self.tokenizer.encode("<start>" + caption + "<end>")
 
-        # return pre-processed image and caption tensors
+        # the pad token will be added to the right of the end token
+
         return image, caption
 
-        """
-            path = self.image_paths[index]
-
-            # Convert image to tensor and pre-process using transform
-            PIL_image = Image.open(os.path.join(self.img_folder, path)).convert("RGB")
-            orig_image = np.array(PIL_image)
-            image = self.transform(PIL_image)
-
-            # return original image and pre-processed image tensor
-            return orig_image, image
-        """
-
-    def get_train_indices(self):
-        sel_length = np.random.choice(self.caption_lengths)
-        all_indices = np.where(
-            [
-                self.caption_lengths[i] == sel_length
-                for i in np.arange(len(self.caption_lengths))
-            ]
-        )[0]
-        indices = list(np.random.choice(all_indices, size=self.batch_size))
-        return indices
-
     def __len__(self):
-        if self.mode == "train":
-            return len(self.ids)
-        else:
-            return len(self.image_paths)
+        return len(self.ids)
 
 
 class Flickr_Dataset(VisionDataset):
@@ -261,7 +257,8 @@ def denormalize_image(img: torch.Tensor) -> np.ndarray:
 
 
 if __name__ == "__main__":
-    # transforms that are needed to run the model by inception_v3
+    # testing the coco
+
     image_transforms = transforms.Compose(
         [
             transforms.Resize(299),
@@ -270,6 +267,24 @@ if __name__ == "__main__":
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ]
     )
+
+    dataset = COCO_Dataset(
+        '/home/datasets/COCO_Dataset/annotations/captions_val2014.json',
+        '/home/datasets/COCO_Dataset/val2014/',
+        #transform=image_transforms,
+    )
+
+    tokenizer = COCO_Dataset.tokenizer
+
+    img, caption = dataset[8123]
+    plt.imshow(img)
+    plt.axis('off')
+    plt.title(caption.tokens)
+    plt.show()
+
+    exit()
+
+    # transforms that are needed to run the model by inception_v3
 
     preliminary_dataset = Flickr_Dataset(
         root="data/Images/",

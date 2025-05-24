@@ -228,8 +228,8 @@ if __name__ == "__main__":
 
             outputs = decoder(images_encoded, captions)
 
-            outputs = outputs[:, :-1, :].reshape(-1, vocab_size)
-            captions = captions[:, 1:].reshape(-1)
+            outputs = outputs.view(-1, vocab_size)
+            captions = captions.view(-1)
             
             loss = criterion(outputs, captions)
 
