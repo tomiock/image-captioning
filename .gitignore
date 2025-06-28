@@ -14,3 +14,4 @@ models/*
 data/Images
 data/test_images
 data/captions.txt
+data/

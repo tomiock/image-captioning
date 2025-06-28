@@ -83,32 +83,27 @@ class RNN_Decoder(nn.Module):
         features = features.unsqueeze(0)
         output = []
         (h, c) = (
-            torch.zeros(self.num_layers, 1, self.hidden_dim),
-            torch.zeros(self.num_layers, 1, self.hidden_dim),
+            torch.randn(self.num_layers, 1, self.hidden_dim),
+            torch.randn(self.num_layers, 1, self.hidden_dim),
         )
 
+        x, (h, c) = self.lstm(features, (h, c))
+        input = torch.tensor([0])
         for _ in range(max_len):
-            x, (h, c) = self.lstm(features, (h, c))
-            x = self.fc(x)
-            x = x.squeeze(1)
+            token_embed = self.embedding(input)
+            token_embed = token_embed.unsqueeze(1)
+            lstm_out, (h, c) = self.lstm(token_embed, (h, c))
 
-            if False:
-                data = softmax(x).detach().numpy()
-                heights, bins = np.histogram(data, bins=1000)
-                heights = heights / float(sum(heights))
-                binMids = bins[:-1] + np.diff(bins) / 2.0
-                plt.plot(binMids, heights)
-                plt.yscale('log')
-                plt.show()
+            x = self.fc(lstm_out.squeeze(1))
 
             _, pred = x.max(dim=1)
 
             end_token_predicted = pred.item() == self.end_token
-
             if end_token_predicted:
                 break
+
             output.append(pred.item())
-            features = self.embedding(pred.unsqueeze(0))
+            input = pred
 
         return output
 
