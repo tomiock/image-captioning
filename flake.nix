@@ -66,6 +66,7 @@ EOF
                         pythonPackages.transformers
                         pythonPackages.datasets
                         pythonPackages.tokenizers
+                        pythonPackages.pycocotools
                         pythonPackages.wandb
 
                         pythonPackages.kaggle

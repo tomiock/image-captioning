@@ -22,7 +22,7 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 from tqdm import tqdm
 
-from dataset import Flickr8kDataset, captioning_collate_fn, EncodeCaptionsTransform
+from dataset import Flickr_Dataset, captioning_collate_fn, EncodeCaptionsTransform
 from model import CNN_Encoder, RNN_Decoder
 
 np.set_printoptions(threshold=sys.maxsize)
@@ -38,13 +38,13 @@ if __name__ == "__main__":
         ]
     )
 
-    preliminary_dataset = Flickr8kDataset(
+    preliminary_dataset = Flickr_Dataset(
         root="data/Images/",
         ann_file="data/captions.txt",
     )
 
     all_image_ids_sorted = (
-        preliminary_dataset.ids
+        preliminary_dataset.image_paths
     )  # These are sorted unique image paths
     num_total_images = len(all_image_ids_sorted)
 
@@ -101,7 +101,7 @@ if __name__ == "__main__":
     # our own transform for the captions that uses the tokenizer
     caption_encoder_transform = EncodeCaptionsTransform(tokenizer)
 
-    dataset = Flickr8kDataset(
+    dataset = Flickr_Dataset(
         root="data/Images/",
         ann_file="data/captions.txt",
         transform=image_transforms,
@@ -228,8 +228,8 @@ if __name__ == "__main__":
 
             outputs = decoder(images_encoded, captions)
 
-            outputs = outputs[:, :-1, :].reshape(-1, vocab_size)
-            captions = captions[:, 1:].reshape(-1)
+            outputs = outputs.view(-1, vocab_size)
+            captions = captions.view(-1)
             
             loss = criterion(outputs, captions)
 
