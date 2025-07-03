@@ -1,13 +1,11 @@
-import numpy as np
-import matplotlib.pyplot as plt
-
 import torch
 import torch.nn as nn
 
 from torchvision import models
+from torchvision.models.feature_extraction import create_feature_extractor
 from torchinfo import summary
 
-from torch.nn.functional import softmax
+from torchvision.models.vision_transformer import ViT_B_16_Weights
 
 
 class Identity(nn.Module):
@@ -60,7 +58,10 @@ class RNN_Decoder(nn.Module):
         self.embedding = nn.Embedding(vocab_size, embedding_dim, 0)
 
         self.lstm = nn.LSTM(
-            embedding_dim, hidden_dim, num_layers=self.num_layers, batch_first=True,
+            embedding_dim,
+            hidden_dim,
+            num_layers=self.num_layers,
+            batch_first=True,
         )
 
         self.fc = nn.Linear(hidden_dim, vocab_size, bias=False)
@@ -109,6 +110,152 @@ class RNN_Decoder(nn.Module):
 
     def reset_state(self, batch_size):
         return torch.zeros((batch_size, self.hidden_dim))
+
+
+def get_target_mask(size: int) -> torch.Tensor:
+    mask = torch.triu(torch.ones(size, size) * float("-inf"))
+    return mask.float()
+
+
+class TransformerDecoder(nn.Module):
+    def __init__(
+        self, hidden_size: int, num_heads: int, vocab_size: int, num_layers: int
+    ):
+        super(TransformerDecoder, self).__init__()
+
+        MAX_LENGHT = 512
+        self.pos_encoding = nn.Parameter(torch.randn(1, MAX_LENGHT, hidden_size))
+
+        self.embedding = nn.Embedding(vocab_size, hidden_size)
+
+        self.decoder_layer = nn.TransformerDecoderLayer(
+            d_model=hidden_size,
+            nhead=num_heads,
+            batch_first=True,
+        )
+
+        self.decoder = nn.TransformerDecoder(
+            decoder_layer=self.decoder_layer,
+            num_layers=num_layers,
+        )
+
+        self.linear_head = nn.Linear(hidden_size, vocab_size)
+
+    def forward(self, image_tokens, text_sequence) -> torch.Tensor:
+        # text_sequence: (B, L)
+        # image_tokens: (B, N, D)
+
+        text_embeddings = self.embedding(text_sequence)  # (B, L, D)
+
+        text_embeddings = ( # we need to set the PE with the text shape
+            text_embeddings + self.pos_encoding[:, : text_embeddings.shape[1], :]
+        )  # (B, L, D)
+
+        target_mask = get_target_mask(text_sequence.shape[1]).to(text_sequence.device)
+
+        output = self.decoder(
+            tgt=text_embeddings, memory=image_tokens, tgt_mask=target_mask
+        )  # (L, B, D)
+
+        output = self.linear_head(output)  # (B, L, vocab_size)
+
+        return output
+
+    def sample(self, image_tokens, start_token_id, end_token_id, max_length=50):
+        # image_tokens: (B, N, D)
+
+        device = image_tokens.device
+        batch_size = image_tokens.shape[0]
+
+        generated_sequence = torch.full(
+            (batch_size, 1), start_token_id, dtype=torch.long, device=device
+        )
+
+        for _ in range(max_length):
+            # Embed the current generated sequence
+            tgt_embeddings = self.embedding(generated_sequence)  # (B, L_gen, D)
+
+            tgt_embeddings = (
+                tgt_embeddings + self.pos_encoding[:, : tgt_embeddings.shape[1], :]
+            )  # (B, L_gen, D)
+
+            tgt_embeddings = tgt_embeddings.permute(1, 0, 2)  # (L_gen, B, D)
+
+            target_mask = get_target_mask(generated_sequence.shape[1]).to(device)
+
+            output = self.decoder(
+                tgt=tgt_embeddings, memory=image_tokens, tgt_mask=target_mask
+            )  # (L_gen, B, D)
+
+            last_token_output = output[-1, :, :]  # (B, D)
+            logits = self.linear_head(last_token_output)  # (B, vocab_size)
+
+            next_token = torch.argmax(logits, dim=-1)  # (B)
+
+            generated_sequence = torch.cat(
+                (generated_sequence, next_token.unsqueeze(1)), dim=1
+            )  # (B, L_gen + 1)
+
+            if torch.all(next_token == end_token_id):
+                break
+
+        return generated_sequence
+
+
+class ImageCaptioningModel(nn.Module):
+    def __init__(
+        self,
+        vocab_size: int,
+        hidden_size: int,
+        num_heads: int,
+        num_layers: int,
+        frozen_vit: bool = True,
+    ):
+        super(ImageCaptioningModel, self).__init__()
+        self.encoder = get_vit_encoder(frozen=frozen_vit)
+        self.decoder = TransformerDecoder(
+            hidden_size, num_heads, vocab_size, num_layers
+        )
+
+    def forward(self, images, text_sequence) -> torch.Tensor:
+        # images: (B, C, H, W)
+        # text_sequence: (B, L)
+
+        encoder_output = self.encoder(images)
+        image_tokens = encoder_output["visual_tokens"]  # (B, N+1, D)
+
+        output = self.decoder(image_tokens, text_sequence)  # (B, L, vocab_size)
+        return output
+
+    def sample(self, images, start_token_id, end_token_id, max_length=50):
+        # images: (B, C, H, W)
+
+        encoder_output = self.encoder(images)
+        image_tokens = encoder_output["visual_tokens"]  # (B, N+1, D)
+
+        generated_sequence = self.decoder.sample(
+            image_tokens, start_token_id, end_token_id, max_length
+        )
+        return generated_sequence
+
+
+def get_vit_encoder(frozen=False) -> nn.Module:
+    """
+    Input image size: (384, 384)
+
+    Output size: (B, N+1, 768)
+    """
+    vit_model = models.vit_b_16(weights=ViT_B_16_Weights.IMAGENET1K_SWAG_E2E_V1)
+
+    vit_model = create_feature_extractor(
+        vit_model, return_nodes={"encoder.ln": "visual_tokens"}
+    )
+
+    # by default we do NOT train the model
+    for param in vit_model.parameters():
+        param.requires_grad = frozen
+
+    return vit_model
 
 
 def get_encoder() -> nn.Module:
