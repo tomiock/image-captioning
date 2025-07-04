@@ -212,10 +212,12 @@ class ImageCaptioningModel(nn.Module):
         frozen_vit: bool = True,
     ):
         super(ImageCaptioningModel, self).__init__()
-        self.encoder = get_vit_encoder(frozen=frozen_vit)
+        self.encoder, _ = get_vit_encoder(frozen=frozen_vit)
         self.decoder = TransformerDecoder(
             hidden_size, num_heads, vocab_size, num_layers
         )
+
+        self.image_token_proj = nn.Linear(768, hidden_size, bias=False)
 
     def forward(self, images, text_sequence) -> torch.Tensor:
         # images: (B, C, H, W)
@@ -223,6 +225,7 @@ class ImageCaptioningModel(nn.Module):
 
         encoder_output = self.encoder(images)
         image_tokens = encoder_output["visual_tokens"]  # (B, N+1, D)
+        image_tokens = self.image_token_proj(image_tokens)
 
         output = self.decoder(image_tokens, text_sequence)  # (B, L, vocab_size)
         return output
@@ -239,13 +242,14 @@ class ImageCaptioningModel(nn.Module):
         return generated_sequence
 
 
-def get_vit_encoder(frozen=False) -> nn.Module:
+def get_vit_encoder(frozen=False):
     """
     Input image size: (384, 384)
 
     Output size: (B, N+1, 768)
     """
-    vit_model = models.vit_b_16(weights=ViT_B_16_Weights.IMAGENET1K_SWAG_E2E_V1)
+    weights = ViT_B_16_Weights.IMAGENET1K_SWAG_E2E_V1
+    vit_model = models.vit_b_16(weights)
 
     vit_model = create_feature_extractor(
         vit_model, return_nodes={"encoder.ln": "visual_tokens"}
@@ -255,7 +259,7 @@ def get_vit_encoder(frozen=False) -> nn.Module:
     for param in vit_model.parameters():
         param.requires_grad = frozen
 
-    return vit_model
+    return vit_model, weights
 
 
 def get_encoder() -> nn.Module:

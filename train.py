@@ -10,16 +10,10 @@ from torchvision import transforms
 from tqdm import tqdm
 
 from dataset import COCO_Dataset
-from model import CNN_Encoder, RNN_Decoder, ImageCaptioningModel
+from model import ImageCaptioningModel, get_vit_encoder
 
-image_transforms = transforms.Compose(
-    [
-        transforms.Resize(299),
-        transforms.CenterCrop(299),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-    ]
-)
+_, vit_weights = get_vit_encoder()
+image_transforms = vit_weights.transforms()
 
 train_dataset = COCO_Dataset(
     root="/home/datasets/COCO_Dataset/train2014",
@@ -65,8 +59,8 @@ run = wandb.init(
     project="image-captioning",
     config={
         "learning_rate": 0.0001,
-        "epochs": 10,
-        "batch_size": 256,
+        "epochs": 1,
+        "batch_size": 20,
         "embedding_dim": 512,
         "hidden_dim": 512,
         "vocab_size": tokenizer.get_vocab_size(),
@@ -111,16 +105,14 @@ vocab_size: int = wandb.config.vocab_size
 embedding_dim = wandb.config.embedding_dim
 hidden_dim = wandb.config.hidden_dim
 
-encoder = CNN_Encoder(embed_size=embedding_dim)
-decoder = RNN_Decoder(embedding_dim, hidden_dim, vocab_size=vocab_size)
-
-
 model = ImageCaptioningModel(
     hidden_size=hidden_dim,
     vocab_size=vocab_size,
     num_heads=4,
     num_layers=4
 )
+
+model.to(device)
 
 # --- LOSS and Optimizer ---
 learning_rate = wandb.config.learning_rate
@@ -138,9 +130,6 @@ num_epochs = wandb.config.epochs
 train_batch_step = 0
 best_val_loss = np.inf
 
-wandb.watch(encoder, criterion, log="all", log_freq=100, log_graph=True)
-wandb.watch(decoder, criterion, log="all", log_freq=100, log_graph=True)
-
 for epoch in range(num_epochs):
     model.train()
     total_train_loss = 0.0
@@ -154,9 +143,7 @@ for epoch in range(num_epochs):
 
         optimizer.zero_grad()
 
-        text_tokens = tokenizer.encode(captions)
-
-        outputs = model(images, text_tokens)
+        outputs = model(images, captions)
 
         outputs = outputs.view(-1, vocab_size)
         captions = captions.view(-1)
@@ -180,8 +167,10 @@ for epoch in range(num_epochs):
     avg_train_loss = total_train_loss / len(train_dataloader)
     wandb.log({"train/loss": avg_train_loss, "epoch": epoch + 1})
 
-    encoder.eval()
-    decoder.eval()
+    torch.save(model.state_dict(), "models/model.pth")
+    tokenizer.save("models/tokenizer.json")
+
+    model.eval()
     total_val_loss = 0.0
 
     val_pbar = tqdm(val_dataloader, desc=f"Epoch {epoch + 1}/{num_epochs} [VAL]")
@@ -190,9 +179,12 @@ for epoch in range(num_epochs):
             captions_val = captions_val.to(device)
             images_val = images_val.to(device)
 
-            images_features_val = encoder(images_val)
+            outputs = model(images_val, captions_val)
 
-            pred = decoder(images_features_val, captions_val)
+            outputs = outputs.view(-1, vocab_size)
+            captions = captions.view(-1)
+            
+            loss = criterion(outputs, captions_val)
 
             val_loss = criterion(pred.view(-1, vocab_size), captions_val.view(-1))
 
@@ -213,5 +205,12 @@ for epoch in range(num_epochs):
 
 wandb.log({"best_val_loss": best_val_loss})
 
-wandb.finish()
+artifact_model = wandb.Artifact("model", type="model")
+artifact_model.add_file("models/model.pth")
+run.log_artifact(artifact_model)
 
+artifact_tokenizer = wandb.Artifact("tokenizer", type="model")
+artifact_tokenizer.add_file("models/tokenizer.json")
+run.log_artifact(artifact_tokenizer)
+
+wandb.finish()
