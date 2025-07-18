@@ -154,7 +154,7 @@ class TransformerDecoder(nn.Module):
         target_mask = get_target_mask(text_sequence.shape[1]).to(text_sequence.device)
 
         output = self.decoder(
-            tgt=text_embeddings, memory=image_tokens, tgt_mask=target_mask
+            tgt=text_embeddings, memory=image_tokens, tgt_mask=target_mask, tgt_is_causal=False,
         )  # (L, B, D)
 
         output = self.linear_head(output)  # (B, L, vocab_size)
@@ -181,10 +181,11 @@ class TransformerDecoder(nn.Module):
 
             tgt_embeddings = tgt_embeddings.permute(1, 0, 2)  # (L_gen, B, D)
 
-            target_mask = get_target_mask(generated_sequence.shape[1]).to(device)
+            target_mask = get_target_mask(generated_sequence.shape[0]).to(device)
+            print(target_mask.shape)
 
             output = self.decoder(
-                tgt=tgt_embeddings, memory=image_tokens, tgt_mask=target_mask
+                tgt=tgt_embeddings, memory=image_tokens, tgt_mask=target_mask, tgt_is_causal=False,
             )  # (L_gen, B, D)
 
             last_token_output = output[-1, :, :]  # (B, D)
@@ -235,6 +236,7 @@ class ImageCaptioningModel(nn.Module):
 
         encoder_output = self.encoder(images)
         image_tokens = encoder_output["visual_tokens"]  # (B, N+1, D)
+        image_tokens = self.image_token_proj(image_tokens)
 
         generated_sequence = self.decoder.sample(
             image_tokens, start_token_id, end_token_id, max_length
@@ -248,7 +250,7 @@ def get_vit_encoder(frozen=False):
 
     Output size: (B, N+1, 768)
     """
-    weights = ViT_B_16_Weights.IMAGENET1K_SWAG_E2E_V1
+    weights = ViT_B_16_Weights.IMAGENET1K_V1
     vit_model = models.vit_b_16(weights)
 
     vit_model = create_feature_extractor(
